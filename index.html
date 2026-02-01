@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Salas con Código</title>
+<style>
+body {
+    font-family: Arial;
+    background: #111;
+    color: white;
+    text-align: center;
+}
+input, button {
+    padding: 10px;
+    margin: 5px;
+}
+#chat {
+    display: none;
+}
+#msgs {
+    border: 1px solid #555;
+    height: 200px;
+    overflow-y: auto;
+    margin: 10px;
+    padding: 5px;
+}
+</style>
+</head>
+<body>
+
+<h1>Salas con código</h1>
+
+<div id="menu">
+    <input id="name" placeholder="Tu nombre"><br>
+    <input id="room" placeholder="Código de sala"><br>
+    <button onclick="create()">Crear sala</button>
+    <button onclick="join()">Unirse</button>
+</div>
+
+<div id="chat">
+    <h2>Sala: <span id="roomName"></span></h2>
+    <div id="msgs"></div>
+    <input id="msg" placeholder="Mensaje">
+    <button onclick="send()">Enviar</button>
+</div>
+
+<script>
+let uid = null;
+let currentRoom = null;
+
+function create(){
+    if(!room.value.trim()){
+        alert("Pon un código de sala");
+        return;
+    }
+    start("/create");
+}
+
+function join(){
+    if(!room.value.trim()){
+        alert("Pon el código de la sala");
+        return;
+    }
+    start("/join");
+}
+
+function start(path){
+    fetch("http://localhost:8000" + path, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+            room: room.value,
+            name: name.value || "Anon"
+        })
+    })
+    .then(r => r.json())
+    .then(d => {
+        if(d.error){
+            alert(d.error);
+            return;
+        }
+        uid = d.uid;
+        currentRoom = room.value;
+        menu.style.display = "none";
+        chat.style.display = "block";
+        roomName.textContent = currentRoom;
+        poll();
+    });
+}
+
+function poll(){
+    fetch("http://localhost:8000/poll", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({room: currentRoom, uid})
+    })
+    .then(r => r.json())
+    .then(d => {
+        if(d.msgs){
+            d.msgs.forEach(m => {
+                if(m.msg){
+                    msgs.innerHTML += `<div><b>${m.from}:</b> ${m.msg}</div>`;
+                }
+                if(m.join){
+                    msgs.innerHTML += `<div><i>${m.name} se unió</i></div>`;
+                }
+            });
+            msgs.scrollTop = msgs.scrollHeight;
+        }
+        setTimeout(poll, 1000);
+    });
+}
+
+function send(){
+    if(!msg.value.trim()) return;
+
+    fetch("http://localhost:8000/send", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({
+            room: currentRoom,
+            uid: uid,
+            msg: msg.value
+        })
+    });
+    msg.value = "";
+}
+</script>
+
+</body>
+</html>
+
