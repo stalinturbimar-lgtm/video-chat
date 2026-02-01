@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>Salas con Código</title>
+<title>Salas con código</title>
 <style>
 body {
     font-family: Arial;
@@ -65,7 +65,7 @@ function join(){
 }
 
 function start(path){
-    fetch("http://localhost:8000" + path, {
+    fetch(path, {   // 👈 AQUÍ ESTÁ LA CLAVE
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
@@ -89,7 +89,7 @@ function start(path){
 }
 
 function poll(){
-    fetch("http://localhost:8000/poll", {
+    fetch("/poll", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({room: currentRoom, uid})
@@ -114,7 +114,7 @@ function poll(){
 function send(){
     if(!msg.value.trim()) return;
 
-    fetch("http://localhost:8000/send", {
+    fetch("/send", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
@@ -129,4 +129,3 @@ function send(){
 
 </body>
 </html>
-
