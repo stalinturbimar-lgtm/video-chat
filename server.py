@@ -1,20 +1,18 @@
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import json
-import uuid
-import os
+import json, uuid, os
 
-rooms = {}
+rooms = {}          # room -> {owner, users}
+waiting_queue = [] # match automático
 
 class Handler(BaseHTTPRequestHandler):
 
-    def send_json(self, data, code=200):
+    def send(self, data, code=200):
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(json.dumps(data).encode())
 
-    # 🔥 ESTO ARREGLA EL ERROR 501
     def do_GET(self):
         if self.path == "/" or self.path == "/index.html":
             self.send_response(200)
@@ -37,80 +35,63 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         data = json.loads(self.rfile.read(length))
 
-        # CREAR SALA
-        if self.path == "/create":
-            room = data.get("room")
-            name = data.get("name", "Anon")
-
-            if not room:
-                self.send_json({"error": "Código vacío"}, 400)
-                return
-
-            if room in rooms:
-                self.send_json({"error": "La sala ya existe"}, 409)
-                return
-
+        # MATCH AUTOMÁTICO
+        if self.path == "/match":
             uid = str(uuid.uuid4())
-            rooms[room] = {
-                "users": {uid: []},
-                "names": {uid: name}
-            }
+            name = data.get("name","Anon")
 
-            self.send_json({"uid": uid})
+            if waiting_queue:
+                room = waiting_queue.pop(0)
+                rooms[room]["users"][uid] = {"name":name,"queue":[]}
+            else:
+                room = uuid.uuid4().hex[:6]
+                rooms[room] = {
+                    "owner": uid,
+                    "users": {uid:{"name":name,"queue":[]}}
+                }
+                waiting_queue.append(room)
 
-        # UNIRSE A SALA
-        elif self.path == "/join":
-            room = data.get("room")
-            name = data.get("name", "Anon")
+            self.send({"uid":uid,"room":room})
 
-            if room not in rooms:
-                self.send_json({"error": "La sala no existe"}, 404)
-                return
-
-            uid = str(uuid.uuid4())
-            rooms[room]["users"][uid] = []
-            rooms[room]["names"][uid] = name
+        # SEÑALIZACIÓN (MULTIUSUARIO)
+        elif self.path == "/signal":
+            room = data["room"]
+            uid = data["uid"]
+            signal = data["signal"]
 
             for u in rooms[room]["users"]:
                 if u != uid:
-                    rooms[room]["users"][u].append({
-                        "join": uid,
-                        "name": name
+                    rooms[room]["users"][u]["queue"].append({
+                        "from": uid,
+                        "signal": signal
                     })
+            self.send({"ok":True})
 
-            self.send_json({"uid": uid})
-
-        # POLL
         elif self.path == "/poll":
-            room = data.get("room")
-            uid = data.get("uid")
+            room = data["room"]
+            uid = data["uid"]
+            q = rooms[room]["users"][uid]["queue"]
+            rooms[room]["users"][uid]["queue"] = []
+            self.send(q)
 
-            msgs = rooms.get(room, {}).get("users", {}).get(uid, [])
-            rooms[room]["users"][uid] = []
-            self.send_json({"msgs": msgs})
+        # MODERACIÓN
+        elif self.path == "/kick":
+            room = data["room"]
+            target = data["target"]
+            uid = data["uid"]
 
-        # SEND
-        elif self.path == "/send":
-            room = data.get("room")
-            uid = data.get("uid")
-            msg = data.get("msg")
-
-            for u in rooms[room]["users"]:
-                if u != uid:
-                    rooms[room]["users"][u].append({
-                        "msg": msg,
-                        "from": rooms[room]["names"][uid]
-                    })
-
-            self.send_json({"ok": True})
+            if rooms[room]["owner"] == uid and target in rooms[room]["users"]:
+                del rooms[room]["users"][target]
+                self.send({"kicked":True})
+            else:
+                self.send({"error":"No autorizado"},403)
 
         else:
-            self.send_json({"error": "Ruta inválida"}, 404)
-
+            self.send({"error":"Ruta inválida"},404)
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8000))
-    server = HTTPServer(("0.0.0.0", port), Handler)
-    print(f"Servidor activo en puerto {port}")
-    server.serve_forever()
+    port = int(os.environ.get("PORT",8000))
+    HTTPServer(("0.0.0.0",port),Handler).serve_forever()
+
+
 
