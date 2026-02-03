@@ -2,130 +2,124 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<title>Salas con código</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video Match</title>
+
 <style>
-body {
-    font-family: Arial;
-    background: #111;
-    color: white;
-    text-align: center;
+body{
+    margin:0;
+    font-family:system-ui;
+    background:#0f0f0f;
+    color:white;
+    text-align:center;
 }
-input, button {
-    padding: 10px;
-    margin: 5px;
+button,input{
+    padding:12px;
+    margin:6px;
+    border-radius:8px;
+    border:none;
+    font-size:16px;
 }
-#chat {
-    display: none;
+#videos{
+    display:grid;
+    grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+    gap:8px;
+    padding:10px;
 }
-#msgs {
-    border: 1px solid #555;
-    height: 200px;
-    overflow-y: auto;
-    margin: 10px;
-    padding: 5px;
+video{
+    width:100%;
+    border-radius:10px;
+    background:black;
 }
 </style>
 </head>
+
 <body>
 
-<h1>Salas con código</h1>
+<h2>🎥 Match automático</h2>
 
 <div id="menu">
-    <input id="name" placeholder="Tu nombre"><br>
-    <input id="room" placeholder="Código de sala"><br>
-    <button onclick="create()">Crear sala</button>
-    <button onclick="join()">Unirse</button>
+    <input id="name" placeholder="Tu nombre">
+    <br>
+    <button onclick="start()">🎲 Empezar</button>
 </div>
 
-<div id="chat">
-    <h2>Sala: <span id="roomName"></span></h2>
-    <div id="msgs"></div>
-    <input id="msg" placeholder="Mensaje">
-    <button onclick="send()">Enviar</button>
-</div>
+<div id="videos"></div>
 
 <script>
-let uid = null;
-let currentRoom = null;
+let uid, room, peers={}, stream;
 
-function create(){
-    if(!room.value.trim()){
-        alert("Pon un código de sala");
-        return;
-    }
-    start("/create");
+async function start(){
+    let r = await fetch("/match",{
+        method:"POST",
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({name:name.value||"Anon"})
+    });
+    let d = await r.json();
+    uid=d.uid; room=d.room;
+
+    menu.style.display="none";
+
+    stream = await navigator.mediaDevices.getUserMedia({video:true,audio:true});
+    addVideo(stream,true);
+
+    poll();
 }
 
-function join(){
-    if(!room.value.trim()){
-        alert("Pon el código de la sala");
-        return;
-    }
-    start("/join");
+function addVideo(s,muted=false){
+    let v=document.createElement("video");
+    v.srcObject=s;
+    v.autoplay=true;
+    v.playsInline=true;
+    v.muted=muted;
+    videos.appendChild(v);
 }
 
-function start(path){
-    fetch(path, {   // 👈 AQUÍ ESTÁ LA CLAVE
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-            room: room.value,
-            name: name.value || "Anon"
-        })
-    })
-    .then(r => r.json())
-    .then(d => {
-        if(d.error){
-            alert(d.error);
-            return;
+function createPeer(id){
+    let pc=new RTCPeerConnection();
+    stream.getTracks().forEach(t=>pc.addTrack(t,stream));
+
+    pc.ontrack=e=>addVideo(e.streams[0]);
+    pc.onicecandidate=e=>{
+        if(e.candidate) send({to:id,candidate:e.candidate});
+    };
+    peers[id]=pc;
+    return pc;
+}
+
+function send(signal){
+    fetch("/signal",{
+        method:"POST",
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({room,uid,signal})
+    });
+}
+
+async function poll(){
+    let r=await fetch("/poll",{
+        method:"POST",
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({room,uid})
+    });
+    let data=await r.json();
+
+    for(let m of data){
+        let from=m.from;
+        let s=m.signal;
+        let pc=peers[from]||createPeer(from);
+
+        if(s.offer){
+            await pc.setRemoteDescription(s.offer);
+            let ans=await pc.createAnswer();
+            await pc.setLocalDescription(ans);
+            send({answer:ans});
         }
-        uid = d.uid;
-        currentRoom = room.value;
-        menu.style.display = "none";
-        chat.style.display = "block";
-        roomName.textContent = currentRoom;
-        poll();
-    });
+        if(s.answer) await pc.setRemoteDescription(s.answer);
+        if(s.candidate) await pc.addIceCandidate(s.candidate);
+    }
+    setTimeout(poll,800);
 }
 
-function poll(){
-    fetch("/poll", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({room: currentRoom, uid})
-    })
-    .then(r => r.json())
-    .then(d => {
-        if(d.msgs){
-            d.msgs.forEach(m => {
-                if(m.msg){
-                    msgs.innerHTML += `<div><b>${m.from}:</b> ${m.msg}</div>`;
-                }
-                if(m.join){
-                    msgs.innerHTML += `<div><i>${m.name} se unió</i></div>`;
-                }
-            });
-            msgs.scrollTop = msgs.scrollHeight;
-        }
-        setTimeout(poll, 1000);
-    });
-}
-
-function send(){
-    if(!msg.value.trim()) return;
-
-    fetch("/send", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-            room: currentRoom,
-            uid: uid,
-            msg: msg.value
-        })
-    });
-    msg.value = "";
-}
 </script>
-
 </body>
 </html>
